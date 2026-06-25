@@ -39,10 +39,66 @@ COUNTRY    = "RU"
 MAX_NEWS   = 25
 OUT_FILE   = "news_digest.html"
 
-W_SOURCE   = 0.30
-W_RELEVANT = 0.35
+W_SOURCE   = 0.25
+W_RELEVANT = 0.40
 W_RECENCY  = 0.20
 W_QUALITY  = 0.15
+
+# Темы, где военные новости уместны
+WAR_OK_TOPICS = {"политика", "война", "конфликт", "сво", "спецоперация", "фронт", "военный", "вооружённый", "оборона"}
+# Сильные военные маркеры — если их ≥2 в статье не по военной теме, пропускаем
+WAR_MARKERS = [
+    r"\bСВО\b", r"\bВСУ\b", r"\bспецопераци", r"\bобстрел", r"\bпередов",
+    r"\bмобилизаци", r"\bконтрнаступлен", r"\bминобороны", r"\bвооружённых сил",
+    r"\bбоев", r"\bфронт", r"\bокоп", r"\bснаряд", r"\bПВО\b", r"\bдрон",
+    r"\bбеспилотник", r"\bосвобожден", r"\bтерритори", r"\bЛНР\b", r"\bДНР\b",
+]
+
+def _plural_news(n: int) -> str:
+    rem = n % 100
+    if 11 <= rem <= 19:
+        return "новостей"
+    rem10 = n % 10
+    if rem10 == 1:
+        return "новость"
+    if 2 <= rem10 <= 4:
+        return "новости"
+    return "новостей"
+
+# Корни (≥4 символов) — только уникальные для темы, чтобы не цеплять чужие новости
+TOPIC_TERMS = {
+    "политика": ["депутат","сенатор","парламент","госдум","совфед","законопроект","голосован","оппозици",
+                  "президент","губернатор","саммит","санкци","дипломат","нато","евросоюз","протест","митинг",
+                  "демонстраци","референдум","конституци","брифинг","переговор","правительств","чиновник"],
+    "экономика": ["экономик","инфляци","валют","центробанк","кредит","ипотек","мосбирж","бюджет","дефицит",
+                  "налог","ндфл","пенси","зарплат","доход","промышлен","производств","финанс","инвест","капитал",
+                  "нефт","подорож","подешев","льгот","субсид","рубл","доллар","евро","импорт","экспорт"],
+    "технологии": ["гаджет","смартфон","ноутбук","процессор","видеокарт","нейросет","нейрон","чатgpt",
+                   "робот","дрон","беспилот","хакер","утечк","стартап","инноваци","электромобил","tesla",
+                   "спутник","криптовалют","биткоин","интернет","айфон","iphone","андроид","чип","кибер",
+                   "разработк"],
+    "спорт": ["футбол","хоккей","теннис","баскетбол","волейбол","чемпионат","турнир","олимпиад","матч",
+              "игрок","тренер","сборн","стадион","болельщик","медал","рекорд","лиг","кубк","первенств"],
+    "здравоохранение": ["здравоохранен","больниц","поликлиник","пациент","лекарств","препарат","вакцин",
+                        "прививк","эпидеми","коронавирус","заболева","фармацевт","хирурги","онкологи","диагноз"],
+    "медицина": ["больниц","поликлиник","пациент","лекарств","препарат","вакцин","прививк","эпидеми",
+                 "коронавирус","заболева","фармацевт","хирурги","онкологи","кардиологи","диагноз","лечени"],
+    "образование": ["образовани","университет","студент","преподавател","экзамен","диплом","каникул",
+                    "колледж","бакалавр","магистр","аспирант","школ","школьник","учител","урок",
+                    "учебник","егэ","огэ","оценк","первокласс","задан","тетрад","класс","кабинет"],
+    "культура": ["театр","фестивал","выставк","музей","галере","концерт","спектакл","балет","литератур",
+                 "режиссёр","сценар","премьер","фильм"],
+    "наука": ["исследован","открыти","изобретен","лаборатор","эксперимент","генетик","астроном","археолог",
+              "палеонтолог","академи","физик"],
+    "экология": ["загрязнен","выброс","углерод","наводнени","утилизаци","переработк","заповедник","климат",
+                  "сортировк","зелён","парников","возобновля","озон","почв","свалк","очистк","гидро",
+                  "биоразнообраз","засух","таяни","среда обитани"],
+    "бизнес": ["предпринимател","корпораци","дивиденд","банкрот","конкурент","слияни","поглощен","ритейл",
+               "маркетплейс","бизнес","стартап","акци"],
+    "недвижимость": ["недвижимост","новострой","метраж","застройщик","аренд","ипотек","жиль","квартир"],
+    "транспорт": ["автобус","аэропорт","такси","каршеринг","электричк","самолёт","поезд","метро"],
+    "энергетика": ["электростанци","газопровод","нефтепровод","росатом","энергетик","атом","ядерн"],
+}
 
 SOURCE_AUTHORITY = {
     # Российские информагентства
@@ -67,7 +123,7 @@ DEFAULT_AUTHORITY = 5.0
 # Основные российские RSS-ленты (проверены, работают).
 # Каждый элемент: (название_источника, url)
 RSS_FEEDS = [
-    # IT / технологии — высокая вероятность новостей по AI/ИИ
+    # IT / технологии
     ("CNews",          "https://www.cnews.ru/inc/rss/news.xml"),
     ("Habr",           "https://habr.com/ru/rss/all/all/?fl=ru"),
     ("3DNews",         "https://3dnews.ru/news/rss"),
@@ -81,6 +137,16 @@ RSS_FEEDS = [
     ("РИА Новости",    "https://ria.ru/export/rss2/index.xml"),
     ("Российская газета", "https://rg.ru/xml/index.xml"),
     ("VC.ru",          "https://vc.ru/rss"),
+    ("Фонтанка",       "https://www.fontanka.ru/fontanka.rss"),
+    ("RT на русском",  "https://russian.rt.com/rss"),
+    ("Москва 24",      "https://www.m24.ru/rss.xml"),
+]
+
+# RSS-ленты для темы «культура» (профильные)
+CULTURE_RSS_FEEDS = [
+    ("Газета.Ru Культура", "http://www.gazeta.ru/export/rss/culture.xml"),
+    ("Правда.Ру Культура", "https://www.pravda.ru/culture/export-news.xml"),
+    ("Новости Mail Культура", "http://news.mail.ru/rss/culture/91/"),
 ]
 
 # Резервные RSS-ленты (могут не работать)
@@ -227,65 +293,87 @@ def _parse_rss_etree(xml_text: str, feed_source_name: str) -> list:
                                 published=pub, snippet=snippet))
     return articles
 
+def _word_in_text(word: str, text: str) -> bool:
+    """Проверка целого слова (не подстрока) в тексте. Работает с кириллицей."""
+    escaped = re.escape(word.lower())
+    return bool(re.search(rf"(?:^|\s|[,.!?;:()\-\"«»\d/\\]){escaped}(?:$|\s|[,.!?;:()\-\"«»\d/\\])", text.lower()))
+
+def _match_any(root: str, text: str, text_raw: str) -> bool:
+    """Совпадение корня: сначала целое слово, затем словоформы через pymorphy2."""
+    if _word_in_text(root, text_raw):
+        return True
+    if PYMORPHY_OK and len(root) >= 4:
+        try:
+            for p in MORPH.parse(root):
+                for form in p.lexeme:
+                    if _word_in_text(form.word, text_raw):
+                        return True
+        except Exception:
+            pass
+    return False
+
 def _is_relevant(title: str, snippet: str, topic: str) -> bool:
     """Проверить, относится ли статья к заданной теме."""
-    text = (title + " " + snippet).lower()
     text_raw = title + " " + snippet
-
+    text_lower = text_raw.lower()
     topic_lower = topic.lower().strip()
 
-    # 1. Прямое совпадение полной фразы (например, "искусственный интеллект")
-    if topic_lower in text:
+    # 0. Если тема не военная, а статья пестрит СВО — пропуск
+    if topic_lower not in WAR_OK_TOPICS:
+        war_hits = sum(1 for m in WAR_MARKERS if re.search(m, text_raw))
+        if war_hits >= 2:
+            return False
+
+    # 1. Полная фраза темы — совпадение как целое слово
+    if _word_in_text(topic_lower, text_raw):
         return True
 
-    # 2. Синонимы и аббревиатуры (проверяются с учётом контекста)
-    if "искусственный интеллект" in topic_lower:
-        # "ИИ" как аббревиатура — только отдельным словом (не часть другого слова)
-        if re.search(r"(?:^|\s|[,.!?;:()\-\"«])ИИ(?:$|\s|[,.!?;:()\-\"»])", text_raw):
+    # 2. Синонимы и аббревиатуры для спецтем
+    if "искусственный интеллект" in topic_lower or "ии" == topic_lower:
+        if re.search(r"(?:^|\s|[,.!?;:()\-\"«»\d/\\])ИИ(?:$|\s|[,.!?;:()\-\"«»\d/\\])", text_raw):
             return True
-        # "AI" как английская аббревиатура — отдельным словом
-        if re.search(r"(?:^|\s|[,.!?;:()\-\"«])AI(?:$|\s|[,.!?;:()\-\"»])", text_raw):
+        if re.search(r"(?:^|\s|[,.!?;:()\-\"«»\d/\\])AI(?:$|\s|[,.!?;:()\-\"«»\d/\\])", text_raw):
             return True
-        # Словоформы (родительный падеж и т.д.)
-        if "искусственного интеллекта" in text:
+        if re.search(r"(?:^|\s|[,.!?;:()\-\"«»\d/\\])МЛ(?:$|\s|[,.!?;:()\-\"«»\d/\\])", text_raw):
             return True
-
-    elif "машинное обучение" in topic_lower:
-        if re.search(r"\bML\b", text_raw):
-            return True
-        if "machine learning" in text:
+    if "машинное обучение" in topic_lower:
+        if _word_in_text("ML", text_raw) or _word_in_text("machine learning", text_raw):
             return True
 
-    # 3. Для многословных тем: все ключевые слова должны присутствовать
-    topic_words = [w.lower() for w in topic.split() if len(w) >= 3]
-    if len(topic_words) >= 2:
-        if all(w in text for w in topic_words):
-            return True
-
-    # 4. Для однословных тем: pymorphy2 или запасной стемминг
-    if len(topic_words) == 1:
-        w = topic_words[0]
-        if w in text:
-            return True
-
-        if PYMORPHY_OK:
-            try:
-                parsed = MORPH.parse(w)[0]
-                normal = parsed.normal_form
-                if normal != w and normal in text:
-                    return True
-                for form in parsed.lexeme:
-                    fw = form.word.lower()
-                    if fw != w and fw in text:
-                        return True
-            except Exception:
-                pass
+    # 3. Поиск по словарю синонимов темы
+    key = topic_lower
+    if key in TOPIC_TERMS:
+        roots = TOPIC_TERMS[key]
+    else:
+        # Авто-ключ: обрезаем до 2–3 слов
+        words_sorted = sorted(topic_lower.split(), key=len, reverse=True)
+        for w in words_sorted:
+            if len(w) >= 4 and w in TOPIC_TERMS:
+                roots = TOPIC_TERMS[w]
+                break
         else:
-            # Запасной вариант без pymorphy2: только точное совпадение + простые окончания
-            for suffix in ("а", "у", "ом", "е", "ы", "ов", "ам", "ами", "ах", "ой", "ый", "ий", "ого", "ому"):
-                if (w + suffix) in text:
-                    return True
-        return False
+            for w in words_sorted:
+                if len(w) >= 3:
+                    for k in TOPIC_TERMS:
+                        if k in w or w in k:
+                            roots = TOPIC_TERMS[k]
+                            break
+                    else:
+                        continue
+                    break
+            else:
+                # Нет в словаре — fallback на точные словоформы
+                roots = []
+
+    for root in roots:
+        if _match_any(root, text_lower, text_raw):
+            return True
+
+    # 4. Fallback: все ключевые слова темы встречаются в тексте
+    topic_words = [w.lower() for w in topic_lower.split() if len(w) >= 3]
+    if topic_words:
+        if all(w in text_lower for w in topic_words):
+            return True
 
     return False
 
@@ -361,6 +449,32 @@ def fetch_all_news(topic: str) -> list:
                 seen_titles.add(norm)
                 all_articles.append(art)
 
+    # --- профильные источники по культуре ---
+    if topic.lower() in ("культура", "искусство", "кино", "театр", "музыка", "литература"):
+        for source_name, url in CULTURE_RSS_FEEDS:
+            print(f"  [{source_name}] запрос...")
+            try:
+                resp = requests.get(url, headers=HTTP_HEADERS, timeout=15)
+                resp.raise_for_status()
+            except Exception as e:
+                print(f"       ошибка: {e}")
+                continue
+            xml_text = resp.text
+            if FEEDPARSER_OK:
+                try:
+                    parsed = _parse_rss_feedparser(xml_text, source_name)
+                except Exception:
+                    parsed = _parse_rss_etree(xml_text, source_name)
+            else:
+                parsed = _parse_rss_etree(xml_text, source_name)
+            print(f"       всего {len(parsed)} (без фильтрации)")
+            for art in parsed:
+                norm = _normalize_title(art.title)
+                if art.link not in seen_links and norm not in seen_titles:
+                    seen_links.add(art.link)
+                    seen_titles.add(norm)
+                    all_articles.append(art)
+
     # --- Google News (опционально, может не работать) ---
     if TRY_GOOGLE:
         google_url = RSS_GOOGLE_NEWS.format(q=urllib.parse.quote(topic))
@@ -410,7 +524,7 @@ def _title_relevance(title: str, topic: str) -> float:
             else:
                 matched += 1.0
     ratio = min(matched / len(topic_words), 2.0)
-    return ratio * 5.0
+    return ratio * 5.0 + 2.0  # поднимаем планку, чтобы лучшие новости уходили в зелёную зону
 
 def _recency_score(pub_date: dt.datetime | None) -> float:
     if pub_date is None:
@@ -555,6 +669,14 @@ tr.news-row.active{background:#e8f0fe}
 .btn-original:hover{background:#2471a3}
 .btn-close-panel{background:#ecf0f1;color:#2c3e50}
 .btn-close-panel:hover{background:#dde4e6}
+/* Разворачиваемые строки 26+ */
+.overflow-rows{display:none}
+.overflow-rows.open{display:table-row-group}
+.toggle-row{cursor:pointer;text-align:center;background:#f8f9fa;transition:background .15s}
+.toggle-row:hover{background:#e8ecf0}
+.toggle-row td{padding:14px 16px;border-bottom:2px solid #e0e4e8;font-weight:600;color:#2980b9}
+.toggle-row .arrow{display:inline-block;transition:transform .25s;font-size:1.1rem;margin-right:6px}
+.toggle-row.expanded .arrow{transform:rotate(180deg)}
 @media(max-width:600px){
   body{padding:10px}
   .header{padding:16px}
@@ -566,38 +688,54 @@ tr.news-row.active{background:#e8f0fe}
 """
 
 def generate_html(articles: list, topic: str) -> str:
-    """Собрать HTML-страницу сводки с панелью чтения."""
+    """Собрать HTML-страницу сводки с панелью чтения и раскрытием 26+."""
     import json as _json
 
     now = dt.datetime.now().strftime("%d.%m.%Y, %H:%M")
     sources_list = sorted({a.source for a in articles})
 
+    top_articles = articles[:MAX_NEWS]
+    overflow_articles = articles[MAX_NEWS:]
+    has_more = len(overflow_articles) > 0
+
+    def _make_rows(art_list, start_num=1):
+        nonlocal articles_json
+        r = ""
+        for i, art in enumerate(art_list):
+            rank = start_num + i
+            pub_str = art.published.strftime("%d.%m %H:%M") if art.published else "-"
+            color = _source_color(art.source)
+            sid = f"n{rank}"
+            articles_json.append({
+                "id": sid, "title": art.title, "link": art.link,
+                "source": art.source, "date": pub_str, "score": art.score,
+                "snippet": art.snippet, "color": color,
+            })
+            r += (
+                f'<tr class="news-row" data-id="{sid}">'
+                f'<td class="rank">{rank}</td>'
+                f'<td class="title-cell">{art.title}</td>'
+                f'<td><span class="source-badge" style="--src-clr:{color}">{art.source}</span></td>'
+                f'<td class="date-cell">{pub_str}</td>'
+                f'<td class="score-cell">{_score_bar(art.score)}</td>'
+                f'</tr>\n'
+            )
+        return r
+
     articles_json = []
-    rows = ""
-    for rank, art in enumerate(articles, 1):
-        pub_str = art.published.strftime("%d.%m %H:%M") if art.published else "-"
-        color = _source_color(art.source)
-        snippet_esc = art.snippet.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-        sid = f"n{rank}"
-        articles_json.append({
-            "id": sid,
-            "title": art.title,
-            "link": art.link,
-            "source": art.source,
-            "date": pub_str,
-            "score": art.score,
-            "snippet": art.snippet,
-            "color": color,
-        })
-        rows += (
-            f'<tr class="news-row" data-id="{sid}">'
-            f'<td class="rank">{rank}</td>'
-            f'<td class="title-cell">{art.title}</td>'
-            f'<td><span class="source-badge" style="--src-clr:{color}">{art.source}</span></td>'
-            f'<td class="date-cell">{pub_str}</td>'
-            f'<td class="score-cell">{_score_bar(art.score)}</td>'
-            f'</tr>\n'
+    rows = _make_rows(top_articles, 1)
+
+    if has_more:
+        overflow_rows = _make_rows(overflow_articles, MAX_NEWS + 1)
+        toggle_html = (
+            f'<tfoot><tr class="toggle-row" id="toggleMore" onclick="document.getElementById(\'overflowBody\').classList.toggle(\'open\');this.classList.toggle(\'expanded\');">'
+            f'<td colspan="5"><span class="arrow">&#9660;</span>Ещё {len(overflow_articles)} {_plural_news(len(overflow_articles))}</td>'
+            f'</tr></tfoot>'
         )
+        overflow_html = f'<tbody class="overflow-rows" id="overflowBody">{overflow_rows}</tbody>'
+    else:
+        toggle_html = ""
+        overflow_html = ""
 
     max_score = max((a.score for a in articles), default=0)
     high_importance = sum(1 for a in articles if a.score >= 7.0)
@@ -652,6 +790,8 @@ def generate_html(articles: list, topic: str) -> str:
 <tbody>
 {rows}
 </tbody>
+{overflow_html}
+{toggle_html}
 </table>
 </div>
 <div class="sources-footer">
@@ -796,7 +936,6 @@ def main():
         return
 
     articles = rank_articles(articles, topic)
-    articles = articles[:MAX_NEWS]
 
     html = generate_html(articles, topic)
 
