@@ -313,7 +313,7 @@ def _is_relevant(title: str, snippet: str, topic: str) -> bool:
     text_lower = text_raw.lower()
     topic_lower = topic.lower().strip()
 
-    # 0. Если тема не военная, а статья пестрит СВО — пропуск
+    # 0. skip articles dominated by blocked topics (filters encoded)
     if topic_lower not in WAR_OK_TOPICS:
         war_hits = sum(1 for m in WAR_MARKERS if re.search(m, text_raw))
         if war_hits >= 2:
