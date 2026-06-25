@@ -64,14 +64,20 @@ async def topics_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def weather_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     city = " ".join(context.args).strip() if context.args else "Москва"
-    try:
-        resp = requests.get(WEATHER_URL.format(city), headers=HEADERS, timeout=10)
-        resp.raise_for_status()
-        text = resp.text.strip()
-        if not text or "error" in text.lower():
-            text = f"Город «{city}» не найден."
-    except Exception:
-        text = f"Не удалось получить погоду для «{city}»."
+    text = ""
+    for attempt in range(3):
+        try:
+            resp = requests.get(WEATHER_URL.format(city), headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            text = resp.text.strip()
+            if not text or "error" in text.lower():
+                text = f"Город «{city}» не найден."
+            break
+        except Exception:
+            if attempt < 2:
+                import time; time.sleep(2)
+            else:
+                text = f"Не удалось получить погоду для «{city}»."
     await update.message.reply_text(text)
 
 
@@ -127,7 +133,12 @@ def main():
         print("  Linux/Mac: export TELEGRAM_BOT_TOKEN=ваш_токен")
         sys.exit(1)
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (Application.builder()
+           .token(BOT_TOKEN)
+           .connect_timeout(30)
+           .read_timeout(60)
+           .write_timeout(60)
+           .build())
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
