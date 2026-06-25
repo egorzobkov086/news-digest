@@ -22,6 +22,15 @@ except ImportError:
     FEEDPARSER_OK = False
     print("feedparser не найден - использую xml.etree. Рекомендуется: pip install feedparser")
 
+try:
+    import pymorphy2
+    MORPH = pymorphy2.MorphAnalyzer()
+    PYMORPHY_OK = True
+except ImportError:
+    PYMORPHY_OK = False
+    MORPH = None
+    print("pymorphy2 не найден - используйте pip install pymorphy2 для точного поиска словоформ")
+
 # ======================== КОНФИГУРАЦИЯ ========================
 
 TOPIC      = "искусственный интеллект"
@@ -81,7 +90,7 @@ RSS_FEEDS_EXTRA = [
 
 # Google News (часто недоступен из РФ; включается опционально)
 RSS_GOOGLE_NEWS = f"https://news.google.com/rss/search?q={{q}}&hl={LANG}&gl={COUNTRY}&ceid={COUNTRY}:{LANG}"
-TRY_GOOGLE = True   # попытаться запросить Google News (может висеть)
+TRY_GOOGLE = False  # Google News заблокирован в РФ, не тратим время
 GOOGLE_TIMEOUT = 8   # секунд на попытку
 
 HTTP_HEADERS = {
@@ -115,7 +124,7 @@ def _clean_html(html_text: str) -> str:
     clean = re.sub(r"<[^>]+>", " ", html_text)
     clean = re.sub(r"&[a-z]+;", " ", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
-    return clean[:500]
+    return clean[:2000]
 
 def _parse_date(date_str: str) -> dt.datetime | None:
     if not date_str:
@@ -158,7 +167,22 @@ def _parse_rss_feedparser(xml_text: str, feed_source_name: str) -> list:
             continue
         source = _extract_source_from_entry(entry, title, feed_source_name)
         pub = _parse_date(entry.get("published", "") or entry.get("updated", ""))
-        snippet = _clean_html(entry.get("summary", "") or entry.get("description", ""))
+        # Пробуем взять полный текст из разных полей RSS/Atom
+        raw_content = (
+            entry.get("summary", "")
+            or entry.get("description", "")
+        )
+        # Atom: content[0].value — часто полный текст статьи
+        content_list = entry.get("content", [])
+        if content_list and isinstance(content_list, list):
+            content_val = content_list[0].get("value", "") if isinstance(content_list[0], dict) else ""
+            if len(content_val) > len(raw_content):
+                raw_content = content_val
+        # RSS 2.0: content:encoded
+        encoded = entry.get("content:encoded", "")
+        if len(encoded) > len(raw_content):
+            raw_content = encoded
+        snippet = _clean_html(raw_content)
         articles.append(Article(title=title, link=link, source=source,
                                 published=pub, snippet=snippet))
     return articles
@@ -191,7 +215,14 @@ def _parse_rss_etree(xml_text: str, feed_source_name: str) -> list:
             source = feed_source_name
 
         pub = _parse_date(pub_e.text) if pub_e is not None else None
-        snippet = _clean_html(desc_e.text) if desc_e is not None else ""
+        desc_text = desc_e.text if desc_e is not None else ""
+        # Попробовать content:encoded (RSS 2.0 — полный текст статьи)
+        ns = {"content": "http://purl.org/rss/1.0/modules/content/"}
+        enc_e = item.find("content:encoded", ns)
+        enc_text = enc_e.text if enc_e is not None and enc_e.text else ""
+        if len(enc_text) > len(desc_text):
+            desc_text = enc_text
+        snippet = _clean_html(desc_text)
         articles.append(Article(title=title, link=link, source=source,
                                 published=pub, snippet=snippet))
     return articles
@@ -231,17 +262,29 @@ def _is_relevant(title: str, snippet: str, topic: str) -> bool:
         if all(w in text for w in topic_words):
             return True
 
-    # 4. Для однословных тем: ищем слово и его формы (стеминг «на коленке»)
+    # 4. Для однословных тем: pymorphy2 или запасной стемминг
     if len(topic_words) == 1:
         w = topic_words[0]
         if w in text:
             return True
-        # Убираем 1–2 последних символа для поиска словоформ
-        # "экономика" → "экономик" найдёт "экономике", "экономики" и т.д.
-        for cut in (2, 1):
-            stem = w[:-cut]
-            if len(stem) >= 5 and re.search(r"\b" + re.escape(stem) + r"\w*\b", text):
-                return True
+
+        if PYMORPHY_OK:
+            try:
+                parsed = MORPH.parse(w)[0]
+                normal = parsed.normal_form
+                if normal != w and normal in text:
+                    return True
+                for form in parsed.lexeme:
+                    fw = form.word.lower()
+                    if fw != w and fw in text:
+                        return True
+            except Exception:
+                pass
+        else:
+            # Запасной вариант без pymorphy2: только точное совпадение + простые окончания
+            for suffix in ("а", "у", "ом", "е", "ы", "ов", "ам", "ами", "ах", "ой", "ый", "ий", "ого", "ому"):
+                if (w + suffix) in text:
+                    return True
         return False
 
     return False
@@ -458,7 +501,9 @@ th{background:#f8f9fa;font-size:.78rem;text-transform:uppercase;
    border-bottom:2px solid #e0e4e8}
 td{padding:10px 16px;border-bottom:1px solid #e0e4e8;font-size:.92rem;vertical-align:middle}
 tr:last-child td{border-bottom:none}
-tr:hover{background:#f8f9ff}
+tr.news-row{cursor:pointer;transition:background .15s}
+tr.news-row:hover{background:#f0f4ff}
+tr.news-row.active{background:#e8f0fe}
 .rank{width:40px;font-weight:700;color:#7f8c8d;text-align:center}
 .title-cell a{color:#2c3e50;text-decoration:none}
 .title-cell a:hover{color:#2980b9;text-decoration:underline}
@@ -476,31 +521,78 @@ tr:hover{background:#f8f9ff}
                 font-size:.82rem;color:#7f8c8d}
 .sources-footer .chip{display:inline-block;padding:2px 8px;margin:2px 4px;
                        border-radius:10px;font-size:.76rem;background:#eee;color:#444}
+/* Панель чтения новости */
+.overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);
+         z-index:99;display:none}
+.overlay.show{display:block}
+.reader-panel{position:fixed;top:0;right:0;width:480px;max-width:92vw;height:100vh;
+              background:#fff;z-index:100;box-shadow:-4px 0 20px rgba(0,0,0,.15);
+              transform:translateX(100%);transition:transform .3s ease;
+              display:flex;flex-direction:column;overflow-y:auto}
+.reader-panel.open{transform:translateX(0)}
+.reader-header{display:flex;align-items:flex-start;justify-content:space-between;
+               padding:20px 24px;border-bottom:1px solid #e0e4e8;gap:12px}
+.reader-header h2{font-size:1.15rem;line-height:1.4;color:#2c3e50;flex:1}
+.reader-close{background:none;border:none;font-size:1.6rem;cursor:pointer;
+              color:#7f8c8d;padding:0 4px;line-height:1;flex-shrink:0}
+.reader-close:hover{color:#e74c3c}
+.reader-meta{padding:14px 24px;border-bottom:1px solid #f0f2f5;font-size:.82rem;color:#7f8c8d}
+.reader-meta-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px}
+.reader-meta-row:last-child{margin-bottom:0}
+.reader-importance{display:flex;align-items:center;gap:6px;font-size:.8rem}
+.reader-importance .imp-dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0}
+.reader-importance .imp-label{font-weight:600}
+.reader-body{padding:20px 24px;flex:1;overflow-y:auto;font-size:.95rem;line-height:1.75;
+             color:#2c3e50}
+.reader-body p{margin-bottom:14px;text-indent:1.5em}
+.reader-body p:first-child{font-weight:500;font-size:1.02rem;color:#1a252f}
+.reader-body .no-content{color:#95a5a6;font-style:italic;text-indent:0;text-align:center;padding:30px 0}
+.reader-footer{padding:16px 24px;border-top:1px solid #e0e4e8;display:flex;gap:10px;
+               flex-wrap:wrap}
+.reader-footer a{display:inline-block;padding:8px 18px;border-radius:6px;
+                 text-decoration:none;font-size:.88rem;font-weight:600}
+.btn-original{background:#2980b9;color:#fff}
+.btn-original:hover{background:#2471a3}
+.btn-close-panel{background:#ecf0f1;color:#2c3e50}
+.btn-close-panel:hover{background:#dde4e6}
 @media(max-width:600px){
   body{padding:10px}
   .header{padding:16px}
   .header h1{font-size:1.3rem}
   .stats{flex-direction:column}
   .stat-card{padding:12px}
+  .reader-panel{width:100vw;max-width:100vw}
 }
 """
 
 def generate_html(articles: list, topic: str) -> str:
-    """Собрать HTML-страницу сводки."""
+    """Собрать HTML-страницу сводки с панелью чтения."""
+    import json as _json
+
     now = dt.datetime.now().strftime("%d.%m.%Y, %H:%M")
     sources_list = sorted({a.source for a in articles})
 
+    articles_json = []
     rows = ""
     for rank, art in enumerate(articles, 1):
         pub_str = art.published.strftime("%d.%m %H:%M") if art.published else "-"
         color = _source_color(art.source)
-        snippet_esc = art.snippet.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")[:200]
+        snippet_esc = art.snippet.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        sid = f"n{rank}"
+        articles_json.append({
+            "id": sid,
+            "title": art.title,
+            "link": art.link,
+            "source": art.source,
+            "date": pub_str,
+            "score": art.score,
+            "snippet": art.snippet,
+            "color": color,
+        })
         rows += (
-            f'<tr>'
+            f'<tr class="news-row" data-id="{sid}">'
             f'<td class="rank">{rank}</td>'
-            f'<td class="title-cell">'
-            f'<a href="{art.link}" target="_blank" rel="noopener" title="{snippet_esc}">{art.title}</a>'
-            f'</td>'
+            f'<td class="title-cell">{art.title}</td>'
             f'<td><span class="source-badge" style="--src-clr:{color}">{art.source}</span></td>'
             f'<td class="date-cell">{pub_str}</td>'
             f'<td class="score-cell">{_score_bar(art.score)}</td>'
@@ -513,6 +605,7 @@ def generate_html(articles: list, topic: str) -> str:
         f'<span class="chip" style="border-left:4px solid {_source_color(s)}">{s}</span> '
         for s in sources_list
     )
+    art_data_json = _json.dumps(articles_json, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
 <html lang="ru">
@@ -523,6 +616,20 @@ def generate_html(articles: list, topic: str) -> str:
 <style>{CSS}</style>
 </head>
 <body>
+<div class="overlay" id="overlay"></div>
+<div class="reader-panel" id="readerPanel">
+  <div class="reader-header">
+    <h2 id="readerTitle"></h2>
+    <button class="reader-close" id="readerClose">&times;</button>
+  </div>
+  <div class="reader-meta" id="readerMeta"></div>
+  <div class="reader-body" id="readerBody"></div>
+  <div class="reader-footer">
+    <a class="btn-original" id="readerLink" href="#" target="_blank" rel="noopener">Читать оригинал &rarr;</a>
+    <a class="btn-close-panel" href="#" id="readerCloseBtn">Закрыть</a>
+  </div>
+</div>
+
 <div class="container">
 <div class="header">
 <h1>Сводка новостей по теме <span class="topic">{topic}</span></h1>
@@ -530,6 +637,7 @@ def generate_html(articles: list, topic: str) -> str:
 Сгенерировано: {now} &middot;
 Источников: {len(sources_list)} &middot;
 Язык: {LANG} / {COUNTRY}
+<br><small>Кликните на строку, чтобы прочитать новость здесь</small>
 </div>
 </div>
 <div class="stats">
@@ -551,6 +659,110 @@ def generate_html(articles: list, topic: str) -> str:
 {source_chips}
 </div>
 </div>
+
+<script>
+(function() {{
+    var articles = {art_data_json};
+    var panel = document.getElementById('readerPanel');
+    var overlay = document.getElementById('overlay');
+    var titleEl = document.getElementById('readerTitle');
+    var metaEl = document.getElementById('readerMeta');
+    var bodyEl = document.getElementById('readerBody');
+    var linkEl = document.getElementById('readerLink');
+    var activeRow = null;
+
+    function esc(s) {{
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }}
+
+    function importanceColor(score) {{
+        if (score >= 7.5) return '#2ecc71';
+        if (score >= 5.0) return '#f39c12';
+        return '#95a5a6';
+    }}
+
+    function importanceLabel(score) {{
+        if (score >= 7.5) return 'Высокая';
+        if (score >= 5.0) return 'Средняя';
+        return 'Низкая';
+    }}
+
+    function splitParagraphs(text) {{
+        if (!text || text.trim().length === 0) return ['<p class="no-content">(текст аннотации отсутствует)</p>'];
+        var sentences = text.split(/(?<=[.!?])\s+/);
+        if (sentences.length <= 2) return ['<p>' + esc(text) + '</p>'];
+        var parts = [];
+        var buf = '';
+        for (var i = 0; i < sentences.length; i++) {{
+            var s = sentences[i].trim();
+            if (!s) continue;
+            buf += (buf ? ' ' : '') + s;
+            if (buf.length > 120 || i === sentences.length - 1) {{
+                parts.push('<p>' + esc(buf) + '</p>');
+                buf = '';
+            }}
+        }}
+        if (buf.trim()) parts.push('<p>' + esc(buf) + '</p>');
+        return parts;
+    }}
+
+    function openArticle(art) {{
+        titleEl.textContent = art.title;
+        linkEl.href = art.link;
+
+        var impColor = importanceColor(art.score);
+        var impLabel = importanceLabel(art.score);
+
+        metaEl.innerHTML =
+            '<div class="reader-meta-row">' +
+                '<span class="source-badge" style="--src-clr:' + art.color + '">' + art.source + '</span>' +
+                '<span>' + art.date + '</span>' +
+            '</div>' +
+            '<div class="reader-meta-row">' +
+                '<div class="reader-importance">' +
+                    '<span class="imp-dot" style="background:' + impColor + '"></span>' +
+                    '<span class="imp-label">' + impLabel + ' важность</span>' +
+                    '<span>(' + art.score.toFixed(1) + ' из 10)</span>' +
+                '</div>' +
+            '</div>';
+
+        bodyEl.innerHTML = splitParagraphs(art.snippet).join('');
+        panel.classList.add('open');
+        overlay.classList.add('show');
+    }}
+
+    function closePanel() {{
+        panel.classList.remove('open');
+        overlay.classList.remove('show');
+        if (activeRow) {{
+            activeRow.classList.remove('active');
+            activeRow = null;
+        }}
+    }}
+
+    document.querySelectorAll('.news-row').forEach(function(row) {{
+        row.addEventListener('click', function(e) {{
+            if (activeRow) activeRow.classList.remove('active');
+            activeRow = row;
+            row.classList.add('active');
+            var id = row.getAttribute('data-id');
+            var art = articles.find(function(a) {{ return a.id === id; }});
+            if (art) openArticle(art);
+        }});
+    }});
+
+    document.getElementById('readerClose').addEventListener('click', closePanel);
+    document.getElementById('readerCloseBtn').addEventListener('click', function(e) {{
+        e.preventDefault();
+        closePanel();
+    }});
+    overlay.addEventListener('click', closePanel);
+
+    document.addEventListener('keydown', function(e) {{
+        if (e.key === 'Escape') closePanel();
+    }});
+}})();
+</script>
 </body>
 </html>"""
 
@@ -563,6 +775,7 @@ def main():
         interactive = False
     else:
         interactive = True
+        import os as _os; _os.system("cls" if _os.name == "nt" else "clear")
         print("=" * 50)
         print("=== УТРЕННЯЯ СВОДКА НОВОСТЕЙ ===")
         print("=" * 50)
