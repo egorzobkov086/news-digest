@@ -577,7 +577,7 @@ def _source_color(source: str) -> str:
 
 def _score_bar(score: float) -> str:
     pct = min(int(score * 10), 100)
-    if score >= 7.5:
+    if score >= 7.0:
         clr = "#2ecc71"
     elif score >= 5.0:
         clr = "#f39c12"
