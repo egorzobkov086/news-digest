@@ -171,6 +171,42 @@ CULTURE_RSS_FEEDS = [
     ("Новости Mail Культура", "http://news.mail.ru/rss/culture/91/"),
 ]
 
+# Профильные RSS для узких тем (дополняют основные ленты)
+TOURISM_FEEDS = [
+    ("Турпром", "https://www.tourprom.ru/rss/"),
+    ("Travel Russian News", "https://www.trn-news.ru/rss"),
+]
+
+AUTO_FEEDS = [
+    ("За рулём", "https://www.zr.ru/rss/rss_all.xml"),
+    ("Авто.ру Журнал", "https://mag.auto.ru/rss/"),
+    ("Колёса.ру", "https://www.kolesa.ru/rss"),
+]
+
+HISTORY_FEEDS = [
+    ("Дилетант", "https://diletant.media/rss/"),
+]
+
+AGRICULTURE_FEEDS = [
+    ("Агроинвестор", "https://www.agroinvestor.ru/rss/"),
+]
+
+ENERGY_FEEDS = [
+    ("Neftegaz.RU", "https://neftegaz.ru/rss/"),
+]
+
+ECOLOGY_FEEDS = [
+    ("Recycle", "https://recyclemag.ru/rss"),
+]
+
+SPACE_FEEDS = [
+    ("Госкорпорация Роскосмос", "https://www.roscosmos.ru/rss/"),
+]
+
+CINEMA_FEEDS = [
+    ("Film.ru", "https://www.film.ru/rss/news"),
+]
+
 # Резервные RSS-ленты (могут не работать)
 RSS_FEEDS_EXTRA = [
     ("РБК",            "https://rssexport.rbc.ru/rbcnews/news/20/full.rss"),
@@ -406,96 +442,110 @@ def _normalize_title(title: str) -> str:
     t = re.sub(r"\s+", " ", t)
     return t[:80]
 
-def fetch_all_news(topic: str) -> list:
-    """Собрать новости из всех RSS-источников, отфильтровать по теме."""
+def _fetch_feed(source_name: str, url: str, all_articles: list,
+                seen_links: set, seen_titles: set,
+                topic: str = "", filter_by_topic: bool = True):
+    """Скачать и разобрать одну RSS-ленту, добавив статьи в общий список."""
+    print(f"  [{source_name}] запрос...")
+    try:
+        resp = requests.get(url, headers=HTTP_HEADERS, timeout=15)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"       ошибка: {e}")
+        return
+
+    xml_text = resp.text
+    if FEEDPARSER_OK:
+        try:
+            parsed = _parse_rss_feedparser(xml_text, source_name)
+        except Exception as e:
+            print(f"       feedparser: {e}, fallback etree")
+            parsed = _parse_rss_etree(xml_text, source_name)
+    else:
+        parsed = _parse_rss_etree(xml_text, source_name)
+
+    if filter_by_topic:
+        relevant = [a for a in parsed if _is_relevant(a.title, a.snippet, topic)]
+        print(f"       всего {len(parsed)}, релевантных {len(relevant)}")
+        parsed = relevant
+
+    for art in parsed:
+        norm = _normalize_title(art.title)
+        if art.link not in seen_links and norm not in seen_titles:
+            seen_links.add(art.link)
+            seen_titles.add(norm)
+            all_articles.append(art)
+
+
+def fetch_all_news(topic: str, max_age_days: int = 7) -> list:
+    """Собрать новости из всех RSS-источников, отфильтровать по теме и дате (≤max_age_days дней)."""
     all_articles: list[Article] = []
     seen_links: set[str] = set()
     seen_titles: set[str] = set()
 
     # --- основные российские источники ---
     for source_name, url in RSS_FEEDS:
-        print(f"  [{source_name}] запрос...")
-        try:
-            resp = requests.get(url, headers=HTTP_HEADERS, timeout=15)
-            resp.raise_for_status()
-        except Exception as e:
-            print(f"       ошибка: {e}")
-            continue
-
-        xml_text = resp.text
-        if FEEDPARSER_OK:
-            try:
-                parsed = _parse_rss_feedparser(xml_text, source_name)
-            except Exception as e:
-                print(f"       feedparser: {e}, fallback etree")
-                parsed = _parse_rss_etree(xml_text, source_name)
-        else:
-            parsed = _parse_rss_etree(xml_text, source_name)
-
-        # фильтрация по теме
-        relevant = [a for a in parsed if _is_relevant(a.title, a.snippet, topic)]
-        print(f"       всего {len(parsed)}, релевантных {len(relevant)}")
-
-        for art in relevant:
-            norm = _normalize_title(art.title)
-            if art.link not in seen_links and norm not in seen_titles:
-                seen_links.add(art.link)
-                seen_titles.add(norm)
-                all_articles.append(art)
+        _fetch_feed(source_name, url, all_articles, seen_links, seen_titles, topic,
+                    filter_by_topic=True)
 
     # --- дополнительные источники ---
     for source_name, url in RSS_FEEDS_EXTRA:
-        print(f"  [{source_name}] запрос...")
-        try:
-            resp = requests.get(url, headers=HTTP_HEADERS, timeout=15)
-            resp.raise_for_status()
-        except Exception as e:
-            print(f"       ошибка: {e}")
-            continue
-
-        xml_text = resp.text
-        if FEEDPARSER_OK:
-            try:
-                parsed = _parse_rss_feedparser(xml_text, source_name)
-            except Exception:
-                parsed = _parse_rss_etree(xml_text, source_name)
-        else:
-            parsed = _parse_rss_etree(xml_text, source_name)
-
-        relevant = [a for a in parsed if _is_relevant(a.title, a.snippet, topic)]
-        print(f"       всего {len(parsed)}, релевантных {len(relevant)}")
-        for art in relevant:
-            norm = _normalize_title(art.title)
-            if art.link not in seen_links and norm not in seen_titles:
-                seen_links.add(art.link)
-                seen_titles.add(norm)
-                all_articles.append(art)
+        _fetch_feed(source_name, url, all_articles, seen_links, seen_titles, topic,
+                    filter_by_topic=True)
 
     # --- профильные источники по культуре ---
     if topic.lower() in ("культура", "искусство", "кино", "театр", "музыка", "литература"):
         for source_name, url in CULTURE_RSS_FEEDS:
-            print(f"  [{source_name}] запрос...")
-            try:
-                resp = requests.get(url, headers=HTTP_HEADERS, timeout=15)
-                resp.raise_for_status()
-            except Exception as e:
-                print(f"       ошибка: {e}")
-                continue
-            xml_text = resp.text
-            if FEEDPARSER_OK:
-                try:
-                    parsed = _parse_rss_feedparser(xml_text, source_name)
-                except Exception:
-                    parsed = _parse_rss_etree(xml_text, source_name)
-            else:
-                parsed = _parse_rss_etree(xml_text, source_name)
-            print(f"       всего {len(parsed)} (без фильтрации)")
-            for art in parsed:
-                norm = _normalize_title(art.title)
-                if art.link not in seen_links and norm not in seen_titles:
-                    seen_links.add(art.link)
-                    seen_titles.add(norm)
-                    all_articles.append(art)
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по туризму ---
+    if topic.lower() in ("туризм", "путешествия", "отдых"):
+        for source_name, url in TOURISM_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по автомобилям ---
+    if topic.lower() in ("автомобили", "авто", "машины", "транспорт"):
+        for source_name, url in AUTO_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по истории ---
+    if topic.lower() in ("история", "исторический"):
+        for source_name, url in HISTORY_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по сельскому хозяйству ---
+    if topic.lower() in ("сельское хозяйство", "агро", "фермерство", "аграрный"):
+        for source_name, url in AGRICULTURE_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по энергетике ---
+    if topic.lower() in ("энергетика", "энергия", "нефть", "газ"):
+        for source_name, url in ENERGY_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по экологии ---
+    if topic.lower() in ("экология", "природа", "окружающая среда"):
+        for source_name, url in ECOLOGY_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по космосу ---
+    if topic.lower() in ("космос", "астрономия"):
+        for source_name, url in SPACE_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по кино (дополнительно к культуре) ---
+    if topic.lower() in ("кино", "фильмы", "сериалы"):
+        for source_name, url in CINEMA_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
 
     # --- Google News (опционально, может не работать) ---
     if TRY_GOOGLE:
@@ -520,6 +570,16 @@ def fetch_all_news(topic: str) -> list:
                     all_articles.append(art)
         except Exception as e:
             print(f"       ошибка: {e} (Google News недоступен)")
+
+    # --- фильтр по давности (≤ max_age_days дней) ---
+    if max_age_days > 0:
+        cutoff = dt.datetime.now() - dt.timedelta(days=max_age_days)
+        before = len(all_articles)
+        all_articles = [a for a in all_articles
+                        if a.published is None or a.published >= cutoff]
+        after = len(all_articles)
+        if before != after:
+            print(f"  Отсеяно по дате (> {max_age_days} дн): {before - after}")
 
     print(f"\n  Итого уникальных новостей: {len(all_articles)}")
     return all_articles
@@ -553,7 +613,7 @@ def _recency_score(pub_date: dt.datetime | None) -> float:
         return 5.0
     now = dt.datetime.now(pub_date.tzinfo) if pub_date.tzinfo else dt.datetime.now()
     age_hours = max((now - pub_date).total_seconds() / 3600, 0)
-    return 10.0 / (1.0 + max(age_hours / 12, 0))
+    return 10.0 / (1.0 + max(age_hours / 72, 0))
 
 def _title_quality(title: str) -> float:
     if not title:
