@@ -575,8 +575,19 @@ def fetch_all_news(topic: str, max_age_days: int = 7) -> list:
     if max_age_days > 0:
         cutoff = dt.datetime.now() - dt.timedelta(days=max_age_days)
         before = len(all_articles)
-        all_articles = [a for a in all_articles
-                        if a.published is None or a.published >= cutoff]
+        filtered = []
+        for a in all_articles:
+            if a.published is None:
+                filtered.append(a)
+                continue
+            pub = a.published
+            if pub.tzinfo is not None and cutoff.tzinfo is None:
+                pub = pub.replace(tzinfo=None)
+            elif pub.tzinfo is None and cutoff.tzinfo is not None:
+                cutoff = cutoff.replace(tzinfo=None)
+            if pub >= cutoff:
+                filtered.append(a)
+        all_articles = filtered
         after = len(all_articles)
         if before != after:
             print(f"  Отсеяно по дате (> {max_age_days} дн): {before - after}")
