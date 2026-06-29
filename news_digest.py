@@ -23,13 +23,19 @@ except ImportError:
     print("feedparser не найден - использую xml.etree. Рекомендуется: pip install feedparser")
 
 try:
+    import inspect
+    def _getargspec(func):
+        s = inspect.getfullargspec(func)
+        return (s.args, s.varargs, s.varkw, s.defaults)
+    inspect.getargspec = _getargspec
     import pymorphy2
-    MORPH = pymorphy2.MorphAnalyzer()
+    import pymorphy2_dicts_ru, os as _os
+    _dict_path = _os.path.dirname(pymorphy2_dicts_ru.__file__) + "/data"
+    MORPH = pymorphy2.MorphAnalyzer(path=_dict_path)
     PYMORPHY_OK = True
-except ImportError:
+except Exception:
     PYMORPHY_OK = False
     MORPH = None
-    print("pymorphy2 не найден - используйте pip install pymorphy2 для точного поиска словоформ")
 
 # ======================== КОНФИГУРАЦИЯ ========================
 
@@ -173,38 +179,56 @@ CULTURE_RSS_FEEDS = [
 
 # Профильные RSS для узких тем (дополняют основные ленты)
 TOURISM_FEEDS = [
-    ("Турпром", "https://www.tourprom.ru/rss/"),
-    ("Travel Russian News", "https://www.trn-news.ru/rss"),
+    ("ТурДом", "https://www.tourdom.ru/rss.xml"),
+    ("Travel Russian News", "https://www.trn-news.ru/rss/"),
 ]
 
 AUTO_FEEDS = [
-    ("За рулём", "https://www.zr.ru/rss/rss_all.xml"),
-    ("Авто.ру Журнал", "https://mag.auto.ru/rss/"),
-    ("Колёса.ру", "https://www.kolesa.ru/rss"),
+    ("За рулём", "https://www.zr.ru/rss/news/"),
+    ("Колёса.ру", "https://www.kolesa.ru/rss/news.xml"),
+    ("Авторевю", "https://autoreview.ru/rss/news.xml"),
 ]
 
 HISTORY_FEEDS = [
     ("Дилетант", "https://diletant.media/rss/"),
+    ("История.РФ", "https://histrf.ru/rss.xml"),
 ]
 
 AGRICULTURE_FEEDS = [
     ("Агроинвестор", "https://www.agroinvestor.ru/rss/"),
+    ("АгроXXI", "https://www.agroxxi.ru/rss/"),
 ]
 
 ENERGY_FEEDS = [
-    ("Neftegaz.RU", "https://neftegaz.ru/rss/"),
+    ("Энергетика и промышленность", "https://www.eprussia.ru/rss/"),
+    ("ТЭКНОБЛОГ", "https://teknoblog.ru/rss/"),
 ]
 
 ECOLOGY_FEEDS = [
-    ("Recycle", "https://recyclemag.ru/rss"),
+    ("Экосфера", "https://ecosphere.press/rss/"),
+    ("Зелёный мир", "https://greenworld.ru/rss/"),
 ]
 
 SPACE_FEEDS = [
-    ("Госкорпорация Роскосмос", "https://www.roscosmos.ru/rss/"),
+    ("Госкорпорация Роскосмос", "https://www.roscosmos.ru/rss/main/"),
+    ("Астроновости", "https://astronews.ru/export/rss.xml"),
 ]
 
 CINEMA_FEEDS = [
+    ("Киноафиша", "https://www.kinoafisha.info/rss/"),
     ("Film.ru", "https://www.film.ru/rss/news"),
+]
+
+SAFETY_FEEDS = [
+    ("SecurityLab", "https://www.securitylab.ru/rss/"),
+]
+
+MUSIC_FEEDS = [
+    ("Звуки.Ру", "https://www.zvuki.ru/export/rss.xml"),
+]
+
+REALTY_FEEDS = [
+    ("Циан Журнал", "https://www.cian.ru/rss/news.xml"),
 ]
 
 # Резервные RSS-ленты (могут не работать)
@@ -430,7 +454,7 @@ def _is_relevant(title: str, snippet: str, topic: str) -> bool:
     # 4. Fallback: все ключевые слова темы встречаются в тексте
     topic_words = [w.lower() for w in topic_lower.split() if len(w) >= 3]
     if topic_words:
-        if all(w in text_lower for w in topic_words):
+        if all(_word_in_text(w, text_raw) for w in topic_words):
             return True
 
     return False
@@ -544,6 +568,24 @@ def fetch_all_news(topic: str, max_age_days: int = 7) -> list:
     # --- профильные источники по кино (дополнительно к культуре) ---
     if topic.lower() in ("кино", "фильмы", "сериалы"):
         for source_name, url in CINEMA_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по безопасности ---
+    if topic.lower() in ("безопасность", "кибербезопасность", "защита"):
+        for source_name, url in SAFETY_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по музыке ---
+    if topic.lower() in ("музыка", "песни", "концерты"):
+        for source_name, url in MUSIC_FEEDS:
+            _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
+                        topic, filter_by_topic=False)
+
+    # --- профильные источники по недвижимости ---
+    if topic.lower() in ("недвижимость", "жильё", "квартиры"):
+        for source_name, url in REALTY_FEEDS:
             _fetch_feed(source_name, url, all_articles, seen_links, seen_titles,
                         topic, filter_by_topic=False)
 
